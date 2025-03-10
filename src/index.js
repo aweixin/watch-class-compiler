@@ -18,6 +18,7 @@ const defaultConfig = {
   maxBatchDelay: 2000,
   maxRetries: 3,
   retryDelay: 1000,
+  minify: true,// 是否压缩 CSS 文件
   rules: {
     'm': { property: 'margin' },
     'mx': { property: ['margin-left', 'margin-right'] },
@@ -263,22 +264,62 @@ class WatchClassCompiler {
       classSet.forEach(cls => allClasses.add(cls));
     }
 
+    // 修改 compileClass 方法的返回格式
+    const compileClassMinified = (className) => {
+      if (this.cssCache.has(className)) {
+        return this.cssCache.get(className);
+      }
+    
+      const isNegative = className.startsWith('-');
+      const baseClass = isNegative ? className.slice(1) : className;
+      const parts = baseClass.split('-');
+      if (parts.length < 2) return null;
+    
+      const prefix = parts[0];
+      const value = parts.slice(1).join('-');
+      const rule = this.config.rules[prefix];
+      if (!rule) return null;
+    
+      let cssValue;
+      if (rule.isColor) {
+        cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : this.config.valueMap[value];
+        if (!cssValue) return null;
+      } else {
+        cssValue = rule.value || this.config.valueMap[value] || value;
+        if (!rule.value) {
+          const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
+          cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
+        }
+      }
+    
+      const properties = Array.isArray(rule.property) ? rule.property : [rule.property];
+      const cssRules = properties.map(prop => 
+        `${prop}:${isNegative ? `-${cssValue}` : cssValue}`
+      );
+    
+      // 压缩格式的 CSS 规则
+      const cssRule = `.${className}{${cssRules.join(';')}}`;
+      this.cssCache.set(className, cssRule);
+      return cssRule;
+    };
+    
     const cssRules = Array.from(allClasses)
-      .map(className => this.compileClass(className))
+      .map(className => compileClassMinified(className))
       .filter(Boolean);
-
-    const newContent = cssRules.join('\n\n');
-
+    
+    // 所有规则用换行连接，以保持基本的可读
+    const newContent = cssRules.join(this.config.minify ? '' : '\n');
+  
     let existingContent = '';
     try {
       existingContent = await fs.readFile(outputFile, 'utf-8');
     } catch {
       // 文件不存在则忽略
     }
-
+  
     if (existingContent !== newContent) {
       await fs.writeFile(outputFile, newContent, 'utf-8');
-      await logger.info(`Updated CSS file: ${outputFile}, ${cssRules.length} rules written`);
+      await logger.info(`Updated CSS file: ${outputFile}, ${cssRules.length} rules written (minified)`);
     } else {
       await logger.info(`No changes detected in CSS file: ${outputFile}`);
     }
