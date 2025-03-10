@@ -75,135 +75,152 @@ class WatchClassCompiler {
     this.batchPending = false;
     this.batchFiles = new Set();
     this.existingClasses = new Set(); // 存储已存在的类名
+    this.existingClassesCache = null; // 添加缓存属性
+    this.formatters = {
+      css: (rules) => rules.join(this.config.minify ? '' : '\n'),
+      less: (rules) => `@import "variables";\n${rules.join('\n')}`,
+      scss: (rules) => `@import "variables";\n${rules.join('\n')}`
+    };
   }
 
-  // 添加解析现有 CSS 文件的方法
-  async parseExistingCssFiles() {
-    if (!this.config.ignoreExistingClasses || !this.config.existingCssFiles.length) {
-      return;
+  // 添加获取现有类名的方法，带缓存机制
+  async getExistingClasses() {
+    if (this.existingClassesCache) {
+      return this.existingClassesCache;
     }
 
-    for (const cssFile of this.config.existingCssFiles) {
-      try {
-        const content = await fs.readFile(cssFile, 'utf-8');
-        const classRegex = /\.([a-zA-Z0-9_-]+)\s*{/g;
-        let match;
-        while ((match = classRegex.exec(content)) !== null) {
-          this.existingClasses.add(match[1]);
+    const existingClasses = new Set();
+    
+    if (this.config.ignoreExistingClasses && this.config.existingCssFiles.length) {
+      for (const cssFile of this.config.existingCssFiles) {
+        try {
+          const content = await fs.readFile(cssFile, 'utf-8');
+          const classRegex = /\.([a-zA-Z0-9_-]+)\s*{/g;
+          let match;
+          while ((match = classRegex.exec(content)) !== null) {
+            existingClasses.add(match[1]);
+          }
+        } catch (err) {
+          console.warn(`Failed to parse existing CSS file ${cssFile}: ${err.message}`);
         }
-      } catch (err) {
-        console.warn(`Failed to parse existing CSS file ${cssFile}: ${err.message}`);
       }
     }
+
+    this.existingClassesCache = existingClasses;
+    return existingClasses;
   }
+
+  // 修改 compileClass 方法
+  compileClassMinified(className) {
+    if (this.cssCache.has(className)) {
+      return this.cssCache.get(className);
+    }
+  
+    // 解析伪类
+    const [baseClassName, ...modifiers] = className.split(':');
+    const pseudoSelectors = modifiers
+      .map(m => this.config.pseudoClasses[m])
+      .filter(Boolean);
+  
+    // 处理命名空间
+    const { prefix: namespacePrefix, scopes } = this.config.namespace;
+    const scope = Object.entries(scopes)
+      .find(([key]) => baseClassName.startsWith(`${key}-`));
+    
+    const actualPrefix = scope ? scopes[scope[0]] : namespacePrefix;
+    const processedClassName = actualPrefix + (scope ? baseClassName.slice(scope[0].length + 1) : baseClassName);
+  
+    // 原有的类名处理逻辑
+    const isNegative = processedClassName.startsWith('-');
+    const baseClass = isNegative ? processedClassName.slice(1) : processedClassName;
+    const parts = baseClass.split('-');
+    if (parts.length < 2) return null;
+  
+    const rulePrefix = parts[0];
+    const value = parts.slice(1).join('-');
+    const rule = this.config.rules[rulePrefix];
+    if (!rule) return null;
+  
+    let cssValue;
+    if (rule.isColor) {
+      cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : this.config.valueMap[value];
+      if (!cssValue) return null;
+    } else {
+      cssValue = rule.value || this.config.valueMap[value] || value;
+      if (!rule.value) {
+        const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
+        cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
+      }
+    }
+  
+    const properties = Array.isArray(rule.property) ? rule.property : [rule.property];
+    const cssRules = properties.map(prop => 
+      `${prop}:${isNegative ? `-${cssValue}` : cssValue}`
+    );
+  
+    // 压缩格式的 CSS 规则
+    const cssRule = `.${className}{${cssRules.join(';')}}`;
+    this.cssCache.set(className, cssRule);
+    return cssRule;
+  };
 
   // 修改 updateCssFile 方法
   async updateCssFile(logger) {
-    const outputFile = path.join(this.config.outputDir, this.config.outputFileName);
-    await fs.mkdir(this.config.outputDir, { recursive: true });
+    const { format, sourceMap, prettier, banner, footer, separate } = this.config.output;
+    
+    // 按作用域分组规则
+    const scopedRules = new Map();
+    const defaultRules = [];
 
-    const allClasses = new Set();
-    for (const classSet of this.classUsageMap.values()) {
-      classSet.forEach(cls => allClasses.add(cls));
-    }
-
-    // 修改 compileClass 方法的返回格式
-    const compileClassMinified = (className) => {
-      if (this.cssCache.has(className)) {
-        return this.cssCache.get(className);
-      }
-    
-      const isNegative = className.startsWith('-');
-      const baseClass = isNegative ? className.slice(1) : className;
-      const parts = baseClass.split('-');
-      if (parts.length < 2) return null;
-    
-      const prefix = parts[0];
-      const value = parts.slice(1).join('-');
-      const rule = this.config.rules[prefix];
-      if (!rule) return null;
-    
-      let cssValue;
-      if (rule.isColor) {
-        cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : this.config.valueMap[value];
-        if (!cssValue) return null;
-      } else {
-        cssValue = rule.value || this.config.valueMap[value] || value;
-        if (!rule.value) {
-          const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
-          cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
-        }
-      }
-    
-      const properties = Array.isArray(rule.property) ? rule.property : [rule.property];
-      const cssRules = properties.map(prop => 
-        `${prop}:${isNegative ? `-${cssValue}` : cssValue}`
-      );
-    
-      // 压缩格式的 CSS 规则
-      const cssRule = `.${className}{${cssRules.join(';')}}`;
-      this.cssCache.set(className, cssRule);
-      return cssRule;
-    };
-    
     const cssRules = Array.from(allClasses)
-      .filter(className => !this.existingClasses.has(className)) // 过滤掉已存在的类名
-      .map(className => compileClassMinified(className))
+      .filter(className => !existingClasses.has(className))
+      .map(className => this.compileClassMinified(className))
       .filter(Boolean);
-    
-    // 所有规则用换行连接，以保持基本的可读
-    const newContent = cssRules.join(this.config.minify ? '' : '\n');
-  
-    let existingContent = '';
-    try {
-      existingContent = await fs.readFile(outputFile, 'utf-8');
-    } catch {
-      // 文件不存在则忽略
-    }
-  
-    if (existingContent !== newContent) {
-      await fs.writeFile(outputFile, newContent, 'utf-8');
-      await logger.info(`Updated CSS file: ${outputFile}, ${cssRules.length} rules written (minified)`);
+
+    if (separate) {
+      cssRules.forEach(rule => {
+        const scope = Object.keys(this.config.namespace.scopes)
+          .find(key => rule.includes(`${this.config.namespace.scopes[key]}`));
+        
+        if (scope) {
+          if (!scopedRules.has(scope)) {
+            scopedRules.set(scope, []);
+          }
+          scopedRules.get(scope).push(rule);
+        } else {
+          defaultRules.push(rule);
+        }
+      });
+
+      // 分别写入不同文件
+      for (const [scope, rules] of scopedRules) {
+        const content = this.formatOutput(rules, format, banner, footer);
+        const scopedFile = path.join(
+          this.config.outputDir,
+          `${scope}-${this.config.outputFileName}`
+        );
+        await this.writeOutputFile(scopedFile, content, logger);
+      }
+
+      // 写入默认文件
+      if (defaultRules.length > 0) {
+        const content = this.formatOutput(defaultRules, format, banner, footer);
+        const defaultFile = path.join(this.config.outputDir, this.config.outputFileName);
+        await this.writeOutputFile(defaultFile, content, logger);
+      }
     } else {
-      await logger.info(`No changes detected in CSS file: ${outputFile}`);
+      // 单文件输出
+      const content = this.formatOutput(cssRules, format, banner, footer);
+      const outputFile = path.join(this.config.outputDir, this.config.outputFileName);
+      await this.writeOutputFile(outputFile, content, logger);
     }
   }
 
-  // 修改 start 方法
-  async start(logger) {
-    await this.parseExistingCssFiles(); // 在开始监听前解析现有 CSS 文件
-    
-    const watcher = chokidar.watch(this.config.watchDirs, {
-      ignored: /(^|[\/\\])\../,
-      persistent: true,
-      awaitWriteFinish: {
-        stabilityThreshold: 200,
-        pollInterval: 100
-      }
-    });
-
-    watcher
-      .on('add', async filePath => {
-        await logger.info(`File added: ${filePath}`);
-        this.batchFiles.add(filePath);
-        const delay = this.calculateBatchDelay(this.batchFiles.size);
-        await logger.info(`Added to batch, current size: ${this.batchFiles.size}, delay: ${delay}ms`);
-        setTimeout(() => this.processFilesBatch(logger), delay);
-      })
-      .on('change', async filePath => {
-        await logger.info(`File changed: ${filePath}`);
-        this.batchFiles.add(filePath);
-        const delay = this.calculateBatchDelay(this.batchFiles.size);
-        await logger.info(`Added to batch, current size: ${this.batchFiles.size}, delay: ${delay}ms`);
-        setTimeout(() => this.processFilesBatch(logger), delay);
-      })
-      .on('unlink', async filePath => {
-        await logger.info(`File removed: ${filePath}`);
-        await this.handleFileDeletion(filePath, logger);
-      })
-      .on('error', async error => await logger.error(`Watcher error: ${error.message}`));
-
-    await logger.info(`Started watching files in: ${this.config.watchDirs.join(', ')}`);
+  // 格式化输出内容
+  formatOutput(rules, format, banner, footer) {
+    const formatter = this.formatters[format] || this.formatters.css;
+    const content = formatter(rules);
+    return [banner, content, footer].filter(Boolean).join('\n');
   }
 }
 

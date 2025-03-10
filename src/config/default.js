@@ -120,6 +120,32 @@ const defaultConfig = {
   existingCssFiles: [],
   // 是否忽略已存在的类名
   ignoreExistingClasses: true, 
+  
+  // 交互状态配置
+  pseudoClasses: {
+    'hover': ':hover',
+    'focus': ':focus',
+    'active': ':active',
+    'disabled': ':disabled',
+    'first': ':first-child',
+    'last': ':last-child'
+  },
+
+  // 命名空间配置
+  namespace: {
+    prefix: '', // 全局类名前缀
+    scopes: {}, // 作用域配置，如 { 'admin': 'adm-', 'mobile': 'm-' }
+  },
+
+  // 输出配置
+  output: {
+    format: 'css', // 输出格式：css, less, scss
+    sourceMap: false, // 是否生成 sourceMap
+    prettier: false, // 是否格式化输出
+    banner: '', // 文件头部注释
+    footer: '', // 文件尾部注释
+    separate: false, // 是否按作用域分离文件
+  }
 };
 
 module.exports = defaultConfig;
