@@ -4,96 +4,9 @@ const chokidar = require('chokidar');
 const fs = require('fs').promises;
 const path = require('path');
 const chalk = require('chalk');
+const defaultConfig = require('./config/default');
 // 打印欢迎信息
 console.log(chalk.bold(chalk.blue('WatchClass Compiler')));
-
-// 默认配置
-const defaultConfig = {
-  unit: 'px',
-  watchDirs: ['./src/**/*.{wxml,js,vue,jsx,tsx,html}'],
-  outputDir: './dist/css',
-  outputFileName: 'generated.css',
-  batchBaseDelay: 500,
-  batchDelayPerFile: 50,
-  maxBatchDelay: 2000,
-  maxRetries: 3,
-  retryDelay: 1000,
-  minify: true,// 是否压缩 CSS 文件
-  rules: {
-    'm': { property: 'margin' },
-    'mx': { property: ['margin-left', 'margin-right'] },
-    'my': { property: ['margin-top', 'margin-bottom'] },
-    'mt': { property: 'margin-top' },
-    'mr': { property: 'margin-right' },
-    'mb': { property: 'margin-bottom' },
-    'ml': { property: 'margin-left' },
-    'p': { property: 'padding' },
-    'px': { property: ['padding-left', 'padding-right'] },
-    'py': { property: ['padding-top', 'padding-bottom'] },
-    'pt': { property: 'padding-top' },
-    'pr': { property: 'padding-right' },
-    'pb': { property: 'padding-bottom' },
-    'pl': { property: 'padding-left' },
-    'w': { property: 'width' },
-    'h': { property: 'height' },
-    'min-w': { property: 'min-width' },
-    'min-h': { property: 'min-height' },
-    'max-w': { property: 'max-width' },
-    'max-h': { property: 'max-height' },
-    'top': { property: 'top' },
-    'right': { property: 'right' },
-    'bottom': { property: 'bottom' },
-    'left': { property: 'left' },
-    'z': { property: 'z-index', unit: '' },
-    'fs': { property: 'font-size' },
-    'leading': { property: 'line-height' },
-    'tracking': { property: 'letter-spacing' },
-    'font': { property: 'font-weight', unit: '' },
-    'bg': { property: 'background-color', isColor: true },
-    'text': { property: 'color', isColor: true },
-    'border': { property: 'border-color', isColor: true },
-    'border': { property: 'border-width' },
-    'border-t': { property: 'border-top-width' },
-    'border-r': { property: 'border-right-width' },
-    'border-b': { property: 'border-bottom-width' },
-    'border-l': { property: 'border-left-width' },
-    'rounded': { property: 'border-radius' },
-    'rounded-t': { property: ['border-top-left-radius', 'border-top-right-radius'] },
-    'rounded-r': { property: ['border-top-right-radius', 'border-bottom-right-radius'] },
-    'rounded-b': { property: ['border-bottom-left-radius', 'border-bottom-right-radius'] },
-    'rounded-l': { property: ['border-top-left-radius', 'border-bottom-left-radius'] },
-    'd': { property: 'display' },
-    'justify': { property: 'justify-content' },
-    'items': { property: 'align-items' },
-    'gap': { property: 'gap' },
-    'gap-x': { property: ['column-gap', 'gap'] },
-    'gap-y': { property: ['row-gap', 'gap'] },
-    'flex-col': { property: 'flex-direction', value: 'column' },
-    'flex-row': { property: 'flex-direction', value: 'row' },
-    'absolute': { property: 'position', value: 'absolute' },
-    'relative': { property: 'position', value: 'relative' },
-    'shadow': { 
-      property: 'box-shadow',
-      valueMap: {
-        'sm': '0 1px 2px rgba(0,0,0,0.05)',
-        'md': '0 4px 6px rgba(0,0,0,0.1)',
-        'lg': '0 10px 15px rgba(0,0,0,0.1)',
-        'xl': '0 20px 25px rgba(0,0,0,0.15)',
-        'none': 'none'
-      }
-    },
-    'opacity': { property: 'opacity', unit: '', valueMap: { '50': '0.5', '75': '0.75' } },
-    'overflow': { property: 'overflow' },
-    'cursor': { property: 'cursor' },
-    'transition': { property: 'transition', value: 'all 0.3s ease' }
-  },
-  valueMap: {
-    'auto': 'auto',
-    'full': '100%',
-    '0': '0',
-    'transparent': 'transparent'
-  }
-};
 
 // 加载用户配置文件
 async function loadUserConfig() {
@@ -161,100 +74,30 @@ class WatchClassCompiler {
     this.cssCache = new Map();
     this.batchPending = false;
     this.batchFiles = new Set();
+    this.existingClasses = new Set(); // 存储已存在的类名
   }
 
-  // 修复 compileClass 函数
-  compileClass(className) {
-    if (this.cssCache.has(className)) {
-      return this.cssCache.get(className);
+  // 添加解析现有 CSS 文件的方法
+  async parseExistingCssFiles() {
+    if (!this.config.ignoreExistingClasses || !this.config.existingCssFiles.length) {
+      return;
     }
 
-    const isNegative = className.startsWith('-');
-    const baseClass = isNegative ? className.slice(1) : className;
-    const parts = baseClass.split('-');
-    if (parts.length < 2) return null;
-
-    const prefix = parts[0];
-    const value = parts.slice(1).join('-');
-    const rule = this.config.rules[prefix];
-    if (!rule) return null;
-
-    let cssValue;
-    if (rule.isColor) {
-      // 如果是颜色规则，支持 HEX 或 valueMap 中的值
-      cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : this.config.valueMap[value];
-      if (!cssValue) return null; // 如果既不是 HEX 也不是 valueMap 中的值，则忽略
-    } else {
-      cssValue = rule.value || this.config.valueMap[value] || value;
-      if (!rule.value) {
-        const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
-        cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
-      }
-    }
-
-    const properties = Array.isArray(rule.property) ? rule.property : [rule.property];
-    const cssRules = properties.map(prop => 
-      `${prop}: ${isNegative ? `-${cssValue}` : cssValue};`
-    );
-
-    const cssRule = `.${className} {\n  ${cssRules.join('\n  ')}\n}`;
-    this.cssCache.set(className, cssRule);
-    return cssRule;
-  }
-
-  extractClassNames(content) {
-    const regex = /class(?:Name)?=["']([^"']+)["']/g;
-    const matches = [];
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      matches.push(...match[1].split(/\s+/));
-    }
-    return [...new Set(matches)];
-  }
-
-  calculateBatchDelay(fileCount) {
-    const delay = this.config.batchBaseDelay + fileCount * this.config.batchDelayPerFile;
-    return Math.min(delay, this.config.maxBatchDelay);
-  }
-
-  async processFilesBatch(logger, retryCount = 0) {
-    if (this.batchPending || this.batchFiles.size === 0) return;
-
-    this.batchPending = true;
-    const filesToProcess = new Set(this.batchFiles);
-    this.batchFiles.clear();
-    const fileCount = filesToProcess.size;
-
-    try {
-      const processPromises = Array.from(filesToProcess).map(async filePath => {
-        const content = await fs.readFile(filePath, 'utf-8');
-        const classNames = this.extractClassNames(content);
-        this.classUsageMap.set(filePath, new Set(classNames));
-        await logger.info(`Processed file: ${filePath}, found ${classNames.length} classes`);
-      });
-
-      await Promise.all(processPromises);
-      await this.updateCssFile(logger);
-      await logger.info(`Batch processed ${fileCount} files with ${retryCount} retries`);
-    } catch (err) {
-      await logger.error(`Batch processing failed after ${retryCount} retries: ${err.message}`);
-      if (retryCount < this.config.maxRetries) {
-        await logger.warn(`Retrying batch processing (${retryCount + 1}/${this.config.maxRetries})...`);
-        await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
-        await this.processFilesBatch(logger, retryCount + 1);
-      } else {
-        await logger.error(`Max retries (${this.config.maxRetries}) reached, giving up`);
-      }
-    } finally {
-      this.batchPending = false;
-      if (this.batchFiles.size > 0) {
-        const delay = this.calculateBatchDelay(this.batchFiles.size);
-        await logger.info(`Scheduling next batch with ${this.batchFiles.size} files, delay: ${delay}ms`);
-        setTimeout(() => this.processFilesBatch(logger), delay);
+    for (const cssFile of this.config.existingCssFiles) {
+      try {
+        const content = await fs.readFile(cssFile, 'utf-8');
+        const classRegex = /\.([a-zA-Z0-9_-]+)\s*{/g;
+        let match;
+        while ((match = classRegex.exec(content)) !== null) {
+          this.existingClasses.add(match[1]);
+        }
+      } catch (err) {
+        console.warn(`Failed to parse existing CSS file ${cssFile}: ${err.message}`);
       }
     }
   }
 
+  // 修改 updateCssFile 方法
   async updateCssFile(logger) {
     const outputFile = path.join(this.config.outputDir, this.config.outputFileName);
     await fs.mkdir(this.config.outputDir, { recursive: true });
@@ -304,6 +147,7 @@ class WatchClassCompiler {
     };
     
     const cssRules = Array.from(allClasses)
+      .filter(className => !this.existingClasses.has(className)) // 过滤掉已存在的类名
       .map(className => compileClassMinified(className))
       .filter(Boolean);
     
@@ -325,17 +169,10 @@ class WatchClassCompiler {
     }
   }
 
-  async handleFileDeletion(filePath, logger) {
-    if (this.classUsageMap.has(filePath)) {
-      this.classUsageMap.delete(filePath);
-      await logger.info(`File deleted: ${filePath}, removed its classes from tracking`);
-      await this.updateCssFile(logger);
-    } else {
-      await logger.warn(`Deleted file ${filePath} was not tracked`);
-    }
-  }
-
+  // 修改 start 方法
   async start(logger) {
+    await this.parseExistingCssFiles(); // 在开始监听前解析现有 CSS 文件
+    
     const watcher = chokidar.watch(this.config.watchDirs, {
       ignored: /(^|[\/\\])\../,
       persistent: true,
