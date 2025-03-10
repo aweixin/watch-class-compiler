@@ -18,6 +18,7 @@
   "author": "xuzhixin",
   "license": "MIT",
   "dependencies": {
+    "chalk": "^4.1.2",
     "chokidar": "^3.5.3",
     "ts-node": "^10.9.1"
   },

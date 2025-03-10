@@ -3,6 +3,9 @@
 const chokidar = require('chokidar');
 const fs = require('fs').promises;
 const path = require('path');
+const chalk = require('chalk');
+// 打印欢迎信息
+console.log(chalk.bold(chalk.blue('WatchClass Compiler')));
 
 // 默认配置
 const defaultConfig = {
@@ -123,19 +126,28 @@ async function createLogger(outputDir) {
 
   return {
     info: async (msg) => {
-      const logMsg = `[INFO] ${new Date().toISOString()} - ${msg}`;
+      const timestamp = chalk.gray(new Date().toISOString());
+      const level = chalk.blue.bold('[INFO]');
+      const logMsg = `${level} ${timestamp} - ${msg}`;
+      const plainMsg = `[INFO] ${new Date().toISOString()} - ${msg}`;
       console.log(logMsg);
-      await fs.appendFile(logFilePath, logMsg + '\n', 'utf-8');
+      await fs.appendFile(logFilePath, plainMsg + '\n', 'utf-8');
     },
     warn: async (msg) => {
-      const logMsg = `[WARN] ${new Date().toISOString()} - ${msg}`;
+      const timestamp = chalk.gray(new Date().toISOString());
+      const level = chalk.yellow.bold('[WARN]');
+      const logMsg = `${level} ${timestamp} - ${chalk.yellow(msg)}`;
+      const plainMsg = `[WARN] ${new Date().toISOString()} - ${msg}`;
       console.warn(logMsg);
-      await fs.appendFile(logFilePath, logMsg + '\n', 'utf-8');
+      await fs.appendFile(logFilePath, plainMsg + '\n', 'utf-8');
     },
     error: async (msg) => {
-      const logMsg = `[ERROR] ${new Date().toISOString()} - ${msg}`;
+      const timestamp = chalk.gray(new Date().toISOString());
+      const level = chalk.red.bold('[ERROR]');
+      const logMsg = `${level} ${timestamp} - ${chalk.red(msg)}`;
+      const plainMsg = `[ERROR] ${new Date().toISOString()} - ${msg}`;
       console.error(logMsg);
-      await fs.appendFile(logFilePath, logMsg + '\n', 'utf-8');
+      await fs.appendFile(logFilePath, plainMsg + '\n', 'utf-8');
     },
   };
 }
