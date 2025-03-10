@@ -165,13 +165,18 @@ class WatchClassCompiler {
     const rule = this.config.rules[prefix];
     if (!rule) return null;
 
-    let cssValue = rule.value || this.config.valueMap[value] || value;
-    if (!rule.value) {
-      const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
-      cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
+    let cssValue;
+    if (rule.isColor) {
+      // 如果是颜色规则，支持 HEX 或 valueMap 中的值
+      cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? `#${value}` : this.config.valueMap[value];
+      if (!cssValue) return null; // 如果既不是 HEX 也不是 valueMap 中的值，则忽略
+    } else {
+      cssValue = rule.value || this.config.valueMap[value] || value;
+      if (!rule.value) {
+        const unit = rule.unit !== undefined ? rule.unit : this.config.unit;
+        cssValue = this.config.valueMap[value] || (isNaN(value) ? value : `${value}${unit}`);
+      }
     }
-
-    if (rule.isColor && !this.config.valueMap[value]) return null;
 
     const properties = Array.isArray(rule.property) ? rule.property : [rule.property];
     const cssRules = properties.map(prop => 
