@@ -150,6 +150,7 @@ class WatchClassCompiler {
     this.batchFiles = new Set();
   }
 
+  // 修复 compileClass 函数
   compileClass(className) {
     if (this.cssCache.has(className)) {
       return this.cssCache.get(className);
@@ -168,7 +169,7 @@ class WatchClassCompiler {
     let cssValue;
     if (rule.isColor) {
       // 如果是颜色规则，支持 HEX 或 valueMap 中的值
-      cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? `#${value}` : this.config.valueMap[value];
+      cssValue = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : this.config.valueMap[value];
       if (!cssValue) return null; // 如果既不是 HEX 也不是 valueMap 中的值，则忽略
     } else {
       cssValue = rule.value || this.config.valueMap[value] || value;
