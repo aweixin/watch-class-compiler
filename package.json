@@ -1,6 +1,6 @@
 {
   "name": "watch-class-compiler",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A tool to watch and compile CSS classes from files",
   "main": "src/index.js",
   "bin": {
