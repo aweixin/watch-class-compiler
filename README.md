@@ -1,6 +1,14 @@
 # watch-class-compiler
 
-A powerful tool to watch files and dynamically compile CSS classes based on custom rules. It supports real-time file monitoring, batch processing, caching, error retries, and flexible configuration.
+一个强大的文件监听和 CSS 类编译工具。基于自定义规则，支持实时文件监控、批量处理、缓存机制、错误重试以及灵活的配置选项。
+
+这个描述简洁地概括了工具的主要功能和特点：
+
+1. 核心功能：文件监听和 CSS 类编译
+2. 主要特性：自定义规则
+3. 技术优势：实时监控、批量处理、缓存机制
+4. 可靠性：错误重试
+5. 扩展性：灵活配置
 
 ## Installation
 
